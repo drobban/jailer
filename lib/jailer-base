@@ -1,7 +1,7 @@
 #!/bin/sh
 
 VERSION="0.1.2.a0"
-VERSION_BSD=$(uname -K)
+VERSION_BSD=$(uname -U)
 UNAME_m=$(uname -m)
 UNAME_p=$(uname -p)
 UNAME_r=$(uname -r)
@@ -20,7 +20,10 @@ cmd::parse_init "$@"
 
 [ -z "$rc_force" ] && ! checkyesno jail_enable && util::err "jail service is not enabled in /etc/rc.conf, please run 'jailer init' or enable it manually"
 [ -z "${jailer_dir}" ] && util::err "jailer_dir is not set in /etc/rc.conf, please run 'jailer init' or set it manually"
-grep jail_conf_dir /etc/rc.d/jail > /dev/null || util::err "/etc/rc.d/jail is not patched, please run 'jailer init'"
+if [ "${VERSION_BSD}" -lt 1400000 ];
+then
+  grep -q jail_conf_dir /etc/rc.d/jail > /dev/null || util::err "/etc/rc.d/jail is not patched, please run 'jailer init'"
+fi
 
 # Basic Setup
 

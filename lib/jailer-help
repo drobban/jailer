@@ -94,7 +94,7 @@ help::init(){
   cat <<EOF
 Usage: jailer init ...
   info    : Show system and Jailer setup info
-  patch   : Apply Jailer's rc.d/jail patch
+  patch   : Apply Jailer's rc.d/jail patch (for FreeBSD < 14.0)
   zfs     : Create ZFS datasets
   bridge  : auto-configure bridge0
   dhcp    : Install and setup OpenBSD's DHCP server

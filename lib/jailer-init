@@ -97,10 +97,14 @@ init::info(){
   if checkyesno "jail_enable" ; then
     printf "${COLOUR_SET_C}YES!${COLOUR_END}\n"
     printf "${COLOUR_SET_M} patched rc.d/jail file  ==> ${COLOUR_END}"
-    if grep -q "jail_conf_dir" /etc/rc.d/jail ; then
-      printf "${COLOUR_SET_C}YES!${COLOUR_END}\n"
+    if [ ! "${VERSION_BSD}" -lt 1400000 ] ; then
+      printf "${COLOUR_SET_C}No need!${COLOUR_END}\n"
     else
-      printf "${COLOUR_SET_R}NO :(${COLOUR_END}\n"
+      if grep -q "jail_conf_dir" /etc/rc.d/jail ; then
+        printf "${COLOUR_SET_C}YES!${COLOUR_END}\n"
+      else
+        printf "${COLOUR_SET_R}NO :(${COLOUR_END}\n"
+      fi
     fi
     printf "${COLOUR_SET_B}Checking jailer state...${COLOUR_END}\n"
     printf "${COLOUR_SET_M} jailer_dir in rc.conf   ==> ${COLOUR_END}"
@@ -145,6 +149,7 @@ init::info(){
 }
 
 init::patch(){
+  [ ! "${VERSION_BSD}" -lt 1400000 ] && printf "Running FreeBSD ${VERSION_BSD}: No need for patching!\n" && exit
   # Apply illuria's patches
   grep "jail_conf_dir" /etc/rc.d/jail >/dev/null 2>&1
   if [ $? -ne 0 ]; then
@@ -161,24 +166,22 @@ init::patch(){
 
 init::bridge::info(){
   printf "${COLOUR_SET_B}Jailer will configure\n"
-  printf "${COLOUR_SET_M} network interface :${COLOUR_SET_C} bridge0\n"
-  printf "${COLOUR_SET_M} network address   :${COLOUR_SET_C} 10.0.0.1/24${COLOUR_END}\n"
+  printf "${COLOUR_SET_M} network interface :${COLOUR_SET_C} ${_bridge}\n"
+  printf "${COLOUR_SET_M} network address   :${COLOUR_SET_C} ${_addr}${COLOUR_END}\n"
 }
 
 init::bridge::execute(){
-  _bridge='bridge0'
-  _addr="10.0.0.1/24"
   _bcmd=$(cat <<EOF
-  sysrc cloned_interfaces+="${_bridge}"
-  sysrc ifconfig_${_bridge}="inet ${_addr} up"
-  service netif start bridge0
+  sysrc cloned_interfaces+="${_bridge}" && \
+  sysrc ifconfig_${_bridge}="inet ${_addr} up" && \
+  service netif start ${_bridge}
 EOF
 )
   printf "${COLOUR_SET_B}Configuring interface ${COLOUR_SET_C}${_bridge} "
   printf "${COLOUR_SET_B}with IP address ${COLOUR_SET_C}${_addr}${COLOUR_END}: "
   if eval "${_bcmd}" > /dev/null 2>&1 ; then
     printf "${COLOUR_SET_G}Done!${COLOUR_END}\n"
-    printf "${COLOUR_SET_Y}\nYou may run \`${progname} init dhcp\` to setup DHCP server for ${_bridge}${COLOUR_END}\n"
+    printf "${COLOUR_SET_Y}\nYou may run \`${progname} init dhcp -b ${_bridge}\` to setup DHCP server for ${_bridge}${COLOUR_END}\n"
   else
     printf "${COLOUR_SET_R}Failed!${COLOUR_END}\n"
     util::err "Run this command to figure out why network config failed:\n $_bcmd"
@@ -186,6 +189,17 @@ EOF
 }
 
 init::bridge(){
+  _bridge='bridge0'
+  _addr="10.0.0.1/24"
+
+  shift
+  while getopts b:a: _opt; do
+    case ${_opt} in
+      b)  _bridge="${OPTARG}" ;;
+      a)  _addr="${OPTARG}"   ;;
+    esac
+  done
+
   ${_yes:=false}
   if ! ${_yes}; then
     init::bridge::info
@@ -204,6 +218,7 @@ init::dhcp::info(){
   printf "${COLOUR_SET_B}Jailer will\n"
   printf "${COLOUR_SET_M} - Install OpenBSD's ${COLOUR_SET_C}dhcpd${COLOUR_SET_M} from packages.\n"
   printf "${COLOUR_SET_M} - Setup ${COLOUR_SET_C}dhcpd.conf${COLOUR_SET_M}.\n"
+  printf "${COLOUR_SET_M}   - With the range ${COLOUR_SET_C}${_range}${COLOUR_SET_M}.\n"
   printf "${COLOUR_SET_M} - Create ${COLOUR_SET_C}/etc/devfs.rules${COLOUR_SET_M} for VNET Jails.\n"
   printf "${COLOUR_END}"
 }
@@ -211,10 +226,10 @@ init::dhcp::info(){
 init::dhcp::execute(){
   _confpath="/usr/local/etc/dhcpd.conf"
   _conf=$(cat <<EOF
-subnet 10.0.0.0 netmask 255.255.255.0 {
-  range 10.0.0.2 10.0.0.254;
-  option subnet-mask 255.255.255.0;
-  option routers 10.0.0.1;
+subnet ${subnet} netmask ${netmask} {
+  range ${_rangeconf};
+  option subnet-mask ${netmask};
+  option routers ${braddr};
 }
 EOF
 )
@@ -225,33 +240,93 @@ add path 'bpf*' unhide
 EOF
 )
 
-  _dhcpcmd=$(cat <<EOF
-#Installing dhcpd
+  _dhcpdinstall=$(cat <<EOF
 pkg install -y dhcpd
+EOF
+)
 
-# Generating Configuration
+  _dhcpdconf=$(cat <<EOF
 printf "\n${_conf}\n" > ${_confpath}
+EOF
+)
 
-#Test configuration and enable/start dhcpd service
+  _dhcpdtestrun=$(cat <<EOF
 dhcpd -n -f ${_confpath} && service dhcpd enable && service dhcpd start
+EOF
+)
 
-# Add devfs rule for VNET Jails
+  _devfsrulesadd=$(cat <<EOF
 printf "\n${_devfsrules}\n" >> /etc/devfs.rules
 EOF
 )
 
-  printf "${COLOUR_SET_B}Setting up ${COLOUR_SET_C}dhcpd${COLOUR_SET_B}, "
-  printf "${COLOUR_SET_C}dhcpd.conf ${COLOUR_SET_B}and "
-  printf "${COLOUR_SET_C}devfs.rules${COLOUR_END}: "
-  if eval "${_dhcpcmd}" >/dev/null 2>&1 ; then
+
+  printf "${COLOUR_SET_B}Installing ${COLOUR_SET_C}dhcpd${COLOUR_END}: "
+  if eval "${_dhcpdinstall}" >/dev/null 2>&1 ; then
     printf "${COLOUR_SET_G}Done!${COLOUR_END}\n"
   else
     printf "${COLOUR_SET_R}Failed!${COLOUR_END}\n"
-    util::err "Run this command to figure out why ZFS failed:\n $_dhcpcmd \n"
+    util::err "Run this command to figure out why this failed:\n $_dhcpdinstall \n"
+  fi
+
+  printf "${COLOUR_SET_B}Setting up ${COLOUR_SET_C}dhcpd.conf${COLOUR_END}: "
+  if eval "${_dhcpdconf}" >/dev/null 2>&1 ; then
+    printf "${COLOUR_SET_G}Done!${COLOUR_END}\n"
+  else
+    printf "${COLOUR_SET_R}Failed!${COLOUR_END}\n"
+    util::err "Run this command to figure out why this failed:\n $_dhcpdconf \n"
+  fi
+
+  printf "${COLOUR_SET_B}Enabling ${COLOUR_SET_C}dhcpd.conf${COLOUR_END}: "
+  if eval "${_dhcpdtestrun}" >/dev/null 2>&1 ; then
+    printf "${COLOUR_SET_G}Done!${COLOUR_END}\n"
+  else
+    printf "${COLOUR_SET_R}Failed!${COLOUR_END}\n"
+    util::err "Run this command to figure out why this failed:\n $_dhcpdtestrun \n"
+  fi
+
+  printf "${COLOUR_SET_B}Setting up ${COLOUR_SET_C}devfs.rules${COLOUR_END}: "
+  if eval "${_devfsrulesadd}" >/dev/null 2>&1 ; then
+    printf "${COLOUR_SET_G}Done!${COLOUR_END}\n"
+  else
+    printf "${COLOUR_SET_R}Failed!${COLOUR_END}\n"
+    util::err "Run this command to figure out why this failed:\n $_devfsrulesadd \n"
   fi
 }
 
 init::dhcp(){
+  _bridge="bridge0"
+
+  shift
+  while getopts b:r: _opt; do
+    case ${_opt} in
+      b)  _bridge="${OPTARG}" ;;
+      r)  _range="${OPTARG}"  ;;
+    esac
+  done
+
+  # Need to calculate the subnet and netmask for DHCP
+  braddr="$(ifconfig -f inet:dotted ${_bridge} inet | grep 'inet ' | cut -w -f 3)"
+  braddrhead=$(echo ${braddr} | cut -d . -f -3)
+  braddrtail=$(echo ${braddr} | cut -d . -f 4)
+  rangefirst=$(printf "%s.%s" ${braddrhead} $(expr ${braddrtail} + 1))
+
+  subnet=$(printf "%s.%s" ${braddrhead} $(expr ${braddrtail} - 1))
+  netmask="$(ifconfig -f inet:dotted ${_bridge} inet | grep 'inet ' | cut -w -f 5)"
+
+  # Calculate the DHCP pool range if the user didn't provide one
+  if [ -z "${_range}" ];
+  then
+    brbrdc="$(ifconfig -f inet:dotted ${_bridge} inet | grep 'inet ' | cut -w -f 7)"
+    brbrdchead=$(echo ${brbrdc} | cut -d . -f -3)
+    brbrdctail=$(echo ${brbrdc} | cut -d . -f 4)
+    rangelast=$(printf "%s.%s" ${brbrdchead} $(expr ${brbrdctail} - 1))
+
+    _range="${rangefirst}-${rangelast}"
+  fi
+
+  _rangeconf=$(echo "${_range}" | tr '-' ' ')
+
   ${_yes:=false}
   if ! ${_yes}; then
     init::dhcp::info
@@ -270,7 +345,7 @@ init::init(){
   local _dataset _initialised _mpoint _nodef _rcval _zcmd _zpool _zpool_no
   local _yes
 
-  ${_initialised:=false} # Assume it is not
+  ${_initialised:=false} # Assume uninitialized until proven
   _rcval=$(sysrc -nq jailer_dir)
   [ ${#_rcval} -ne 0 ] && _initialised=true
 
@@ -292,9 +367,9 @@ init::init(){
   [   "${_subcommand}"  = "zfs"    ] && init::zfs       && exit
   [   "${_subcommand}"  = "help"   ] && help::init      && exit
   [   "${_subcommand}"  = "info"   ] && init::info      && exit
-  [   "${_subcommand}"  = "dhcp"   ] && init::dhcp      && exit
+  [   "${_subcommand}"  = "dhcp"   ] && init::dhcp   $@ && exit
   [   "${_subcommand}"  = "patch"  ] && init::patch     && exit
-  [   "${_subcommand}"  = "bridge" ] && init::bridge    && exit
+  [   "${_subcommand}"  = "bridge" ] && init::bridge $@ && exit
 
 
   # If jailer is initialised beforehand, inform the user and exit
@@ -312,7 +387,7 @@ init::init(){
   [ $? -eq 0 ] && printf "${COLOUR_SET_G}Done!${COLOUR_END}\n" \
                || printf "${COLOUR_SET_R}Failed!${COLOUR_END}\n"
 
-  init::patch
+  [ "${VERSION_BSD}" -lt 1400000 ] && init::patch
 
   init::suggest
 

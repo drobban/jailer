@@ -12,6 +12,7 @@ else
 fi
 
 # set global variables
+if [ "${COLOR}" != "NO" ]; then
 COLOUR_SET_R="\033[0;31m"
 COLOUR_SET_G="\033[0;32m"
 COLOUR_SET_Y="\033[0;33m"
@@ -20,6 +21,7 @@ COLOUR_SET_M="\033[0;35m"
 COLOUR_SET_C="\033[0;36m"
 COLOUR_SET_W="\033[0;37m"
 COLOUR_END="\033[0m"
+fi
 
 # load libs (before jailer-base)
 . "${LIB}/jailer-cmd"
