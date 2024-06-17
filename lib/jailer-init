@@ -148,6 +148,23 @@ init::info(){
   fi
 }
 
+init::jailconf(){
+  [ "${VERSION_BSD}" -lt 1400000 ] && printf "Requires FreeBSD 14.0-RELEASE or later\n" && exit
+  printf "${COLOUR_SET_B}Configuring ${COLOUR_SET_C}/etc/jail.conf${COLOUR_END}: "
+  if ! fgrep -q '.include "/etc/jail.conf.d/*.conf" ;' /etc/jail.conf 2> /dev/null;
+  then
+    echo '.include "/etc/jail.conf.d/*.conf" ;' >> /etc/jail.conf
+    if [ $? -eq 0 ]; then
+      printf "${COLOUR_SET_G}Done!${COLOUR_END}\n"
+    else
+      printf "${COLOUR_SET_R}Failed!${COLOUR_END}\n"
+      util::warn "Could not configure /etc/jail.conf, you need to take care of it manually"
+    fi
+  else
+      printf "${COLOUR_SET_G}No need!${COLOUR_END}\n"
+  fi
+}
+
 init::patch(){
   [ ! "${VERSION_BSD}" -lt 1400000 ] && printf "Running FreeBSD ${VERSION_BSD}: No need for patching!\n" && exit
   # Apply illuria's patches
@@ -363,13 +380,14 @@ init::init(){
 
   _subcommand="${1}"
 
-  [ ! "${_initialised}" = "true"   ] && init::zfs::parse
-  [   "${_subcommand}"  = "zfs"    ] && init::zfs       && exit
-  [   "${_subcommand}"  = "help"   ] && help::init      && exit
-  [   "${_subcommand}"  = "info"   ] && init::info      && exit
-  [   "${_subcommand}"  = "dhcp"   ] && init::dhcp   $@ && exit
-  [   "${_subcommand}"  = "patch"  ] && init::patch     && exit
-  [   "${_subcommand}"  = "bridge" ] && init::bridge $@ && exit
+  [ ! "${_initialised}" = "true"      ] && init::zfs::parse
+  [   "${_subcommand}"  = "zfs"       ] && init::zfs       && exit
+  [   "${_subcommand}"  = "help"      ] && help::init      && exit
+  [   "${_subcommand}"  = "info"      ] && init::info      && exit
+  [   "${_subcommand}"  = "dhcp"      ] && init::dhcp   $@ && exit
+  [   "${_subcommand}"  = "jailconf"  ] && init::jailconf  && exit
+  [   "${_subcommand}"  = "patch"     ] && init::patch     && exit
+  [   "${_subcommand}"  = "bridge"    ] && init::bridge $@ && exit
 
 
   # If jailer is initialised beforehand, inform the user and exit
@@ -387,7 +405,11 @@ init::init(){
   [ $? -eq 0 ] && printf "${COLOUR_SET_G}Done!${COLOUR_END}\n" \
                || printf "${COLOUR_SET_R}Failed!${COLOUR_END}\n"
 
-  [ "${VERSION_BSD}" -lt 1400000 ] && init::patch
+  if [ "${VERSION_BSD}" -lt 1400000 ]; then
+    init::patch
+  else
+    init::jailconf
+  fi
 
   init::suggest
 
